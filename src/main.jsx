@@ -205,7 +205,7 @@ function App() {
             <div className="warning"><AlertTriangle size={14}/> Compatible x86 images only. Most modern Windows and macOS installers are unsupported.</div>
           </section>
         </div>
-        <section className="card logs"><div className="panel-title"><div><h2>Activity log</h2><p>Recent virtual machine events.</p></div><button className="clear" onClick={() => setLogs([])}>Clear log</button></div><div className="log-list">{logs.slice(-6).reverse().map((line,i)=><div key={i}><i/ ><code>{line}</code></div>)}</div></section>
+        <section className="card logs"><div className="panel-title"><div><h2>Activity log</h2><p>Recent virtual machine events.</p></div><button className="clear" onClick={() => setLogs([])}>Clear log</button></div><div className="log-list">{logs.slice(-6).reverse().map((line,i)=><div key={i}><i/><code>{line}</code></div>)}</div></section>
         <section className="danger"><div><div className="danger-icon"><Trash2 size={17}/></div><div><b>Wipe virtual machine</b><span>Permanently erase the saved image, VM snapshot and local configuration.</span></div></div><button className="button danger-button" onClick={() => setConfirmWipe(true)}><Trash2 size={14}/> Wipe all data</button></section>
         <footer>WebVM runs in your browser. Emulator assets load from a public CDN. Use operating system images you are licensed to use.</footer>
       </div>
