@@ -1,6 +1,6 @@
 # WebVM
 
-A local-first browser interface for running compatible x86 operating systems with [v86](https://github.com/copy/v86).
+A browser-based x86 emulator interface powered by [v86](https://github.com/copy/v86).
 
 ## Run locally
 
@@ -13,23 +13,20 @@ npm run dev
 
 Build with `npm run build`.
 
-## Features
+## Built-in operating systems
 
-- Upload bootable ISO, IMG, BIN and floppy images.
-- Run a v86 x86 emulator in the browser.
-- Select a conservative RAM allocation based on the browser device-memory estimate.
-- Store boot media and VM snapshots in IndexedDB.
-- Start, stop, restart, and wipe the local VM.
-- Download the stored boot image.
+- Linux: starts a lightweight Linux image hosted by the v86 project. No ISO upload is required.
+- Windows: current Windows releases are not supported by v86. A separate virtualization backend and a properly licensed Windows image are required.
+- macOS: macOS is not supported by this browser emulator. Apple hardware and licensing requirements also apply.
 
-## Compatibility
+The Linux image downloads from `https://i.copy.sh/linux.iso` when the user starts the VM. The emulator runtime and BIOS files load from jsDelivr. An internet connection is required.
 
-This uses x86 emulation, not general-purpose hardware virtualization. It supports compatible x86 systems, including some small Linux distributions and older operating systems. Modern Windows releases and macOS are generally not supported. Uploading a file does not guarantee that it will boot.
+## Limitations
 
-Browsers do not expose exact free RAM. The RAM recommendation uses `navigator.deviceMemory` when available and is only an estimate. Browser tabs can be suspended or terminated. Use Stop machine before leaving to request a final snapshot. Browser storage can be cleared by browser settings or storage pressure.
+WebVM uses v86, a lightweight x86 emulator. It does not provide full hardware virtualization, and it cannot run modern 64-bit Windows or macOS. Linux compatibility depends on the image and the browser. The included Linux image is a small demo image, not a full Ubuntu desktop.
+
+RAM settings are estimates. Browser tabs can be suspended or terminated. Snapshot save and restore uses IndexedDB and is best-effort. It is not a substitute for a persistent virtual hard drive.
 
 Wiping WebVM deletes only this application's IndexedDB data. It does not scan or disinfect the host computer. A browser emulator is not a guaranteed security boundary. Do not use it to open malware on a device containing sensitive data.
-
-The v86 runtime and BIOS assets load from jsDelivr. An internet connection is required.
 
 Add a license before distributing this project.
