@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, AlertTriangle, Apple, AppWindow, Cpu, HardDrive, Monitor, Power, RefreshCw, ShieldCheck, Terminal, Trash2, Zap } from "lucide-react";
+import V86 from "v86";
+import wasmUrl from "v86/build/v86.wasm?url";
 import "./style.css";
 
 const DB = "webvm-local", STORE = "machine";
-const V86_CDN = "https://cdn.jsdelivr.net/npm/v86@0.5.473/";
-const V86_FALLBACK = "https://unpkg.com/v86@0.5.473/";
 const BIOS_ROOT = "https://cdn.jsdelivr.net/gh/copy/v86@master/";
 const LINUX_IMAGE = "https://i.copy.sh/linux.iso";
 const estimateRam = () => Math.min(2048, Math.max(256, Math.floor((navigator.deviceMemory || 4) * 256)));
@@ -41,38 +41,7 @@ async function wipeDB() {
     req.onerror = () => reject(req.error);
   });
 }
-function loadV86() {
-  if (window.V86 || window.V86Starter) return Promise.resolve();
-  if (window.v86Promise) return window.v86Promise;
-  window.v86Promise = (async () => {
-    const sources = [
-      V86_CDN + "build/libv86.min.js",
-      V86_FALLBACK + "build/libv86.min.js"
-    ];
-    let lastError;
-    for (const src of sources) {
-      try {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = src;
-          script.async = true;
-          script.onload = resolve;
-          script.onerror = () => {
-            script.remove();
-            reject(new Error("Failed to load " + src));
-          };
-          document.head.appendChild(script);
-        });
-        if (window.V86 || window.V86Starter) return;
-        throw new Error("The v86 script loaded but did not expose its constructor.");
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw new Error("Could not load v86 from either CDN. Check whether your network, browser extension, or DNS filter blocks cdn.jsdelivr.net and unpkg.com. " + (lastError?.message || ""));
-  })();
-  return window.v86Promise;
-}
+
 
 const systems = [
   { id: "linux", name: "Linux", detail: "Lightweight Linux demo", state: "READY", icon: Terminal, available: true },
@@ -142,10 +111,8 @@ function App() {
     if (selectedOS !== "linux" || busy || status === "running") return;
     setBusy(true); setStatus("starting"); setNotice("Loading emulator, BIOS and Linux image...");
     try {
-      await loadV86();
-      const Emulator = window.V86 || window.V86Starter;
-      const instance = new Emulator({
-        wasm_path: V86_CDN + "build/v86.wasm",
+      const instance = new V86({
+        wasm_path: wasmUrl,
         memory_size: ram * 1024 * 1024,
         vga_memory_size: 8 * 1024 * 1024,
         screen_container: display.current,
