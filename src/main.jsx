@@ -4,7 +4,9 @@ import { Activity, AlertTriangle, Apple, AppWindow, Cpu, HardDrive, Monitor, Pow
 import "./style.css";
 
 const DB = "webvm-local", STORE = "machine";
-const ROOT = "https://cdn.jsdelivr.net/gh/copy/v86@master/";
+const V86_CDN = "https://cdn.jsdelivr.net/npm/v86@0.5.473/";
+const V86_FALLBACK = "https://unpkg.com/v86@0.5.473/";
+const BIOS_ROOT = "https://cdn.jsdelivr.net/gh/copy/v86@master/";
 const LINUX_IMAGE = "https://i.copy.sh/linux.iso";
 const estimateRam = () => Math.min(2048, Math.max(256, Math.floor((navigator.deviceMemory || 4) * 256)));
 function openDB() {
@@ -42,15 +44,33 @@ async function wipeDB() {
 function loadV86() {
   if (window.V86 || window.V86Starter) return Promise.resolve();
   if (window.v86Promise) return window.v86Promise;
-  window.v86Promise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = ROOT + "build/libv86.js";
-    script.onload = () => (window.V86 || window.V86Starter)
-      ? resolve()
-      : reject(new Error("The v86 script loaded but did not expose its emulator constructor."));
-    script.onerror = () => reject(new Error("Could not download the v86 emulator. Check your connection or CDN access."));
-    document.head.appendChild(script);
-  });
+  window.v86Promise = (async () => {
+    const sources = [
+      V86_CDN + "build/libv86.min.js",
+      V86_FALLBACK + "build/libv86.min.js"
+    ];
+    let lastError;
+    for (const src of sources) {
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = () => {
+            script.remove();
+            reject(new Error("Failed to load " + src));
+          };
+          document.head.appendChild(script);
+        });
+        if (window.V86 || window.V86Starter) return;
+        throw new Error("The v86 script loaded but did not expose its constructor.");
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw new Error("Could not load v86 from either CDN. Check whether your network, browser extension, or DNS filter blocks cdn.jsdelivr.net and unpkg.com. " + (lastError?.message || ""));
+  })();
   return window.v86Promise;
 }
 
@@ -84,7 +104,7 @@ function App() {
   const saveSnapshot = useCallback(async () => {
     if (!emulator.current) return;
     try {
-      const state = await new Promise((resolve, reject) => emulator.current.save_state((error, value) => error ? reject(error) : resolve(value)));
+      const state = await emulator.current.save_state();
       const next = { ...(vm || {}), os: selectedOS, state, ram, savedAt: Date.now() };
       await write("machine", next); setVm(next); setSavedAt(next.savedAt);
       log("Session snapshot saved locally.");
@@ -125,12 +145,12 @@ function App() {
       await loadV86();
       const Emulator = window.V86 || window.V86Starter;
       const instance = new Emulator({
-        wasm_path: ROOT + "build/v86.wasm",
+        wasm_path: V86_CDN + "build/v86.wasm",
         memory_size: ram * 1024 * 1024,
         vga_memory_size: 8 * 1024 * 1024,
         screen_container: display.current,
-        bios: { url: ROOT + "bios/seabios.bin" },
-        vga_bios: { url: ROOT + "bios/vgabios.bin" },
+        bios: { url: BIOS_ROOT + "bios/seabios.bin" },
+        vga_bios: { url: BIOS_ROOT + "bios/vgabios.bin" },
         cdrom: { url: LINUX_IMAGE },
         autostart: false,
         disable_speaker: true,
@@ -144,7 +164,7 @@ function App() {
         readyHandled = true;
         try {
           if (vm?.state && vm.os === "linux" && vm.ram === ram) {
-            await new Promise((resolve, reject) => instance.restore_state(vm.state, error => error ? reject(error) : resolve()));
+            await instance.restore_state(vm.state);
             log("Restored saved Linux session.");
           } else {
             instance.run();
