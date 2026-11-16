@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, AlertTriangle, Cpu, HardDrive, Info, Monitor, Power, RefreshCw, ShieldCheck, Trash2, Zap, Apple, AppWindow, Terminal } from "lucide-react";
+import { Activity, AlertTriangle, Apple, AppWindow, Cpu, HardDrive, Monitor, Power, RefreshCw, ShieldCheck, Terminal, Trash2, Zap } from "lucide-react";
 import "./style.css";
 
 const DB = "webvm-local", STORE = "machine";
-const CDN = "https://cdn.jsdelivr.net/gh/copy/v86@master/build/";
+const ROOT = "https://cdn.jsdelivr.net/gh/copy/v86@master/";
 const LINUX_IMAGE = "https://i.copy.sh/linux.iso";
-const estimateRam = () => Math.min(2048, Math.max(256, Math.floor((navigator.deviceMemory || 4) * 1024 * .25)));
-const prettySize = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB";
+const estimateRam = () => Math.min(2048, Math.max(256, Math.floor((navigator.deviceMemory || 4) * 256)));
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
@@ -41,22 +40,24 @@ async function wipeDB() {
   });
 }
 function loadV86() {
-  if (window.V86Starter) return Promise.resolve();
+  if (window.V86 || window.V86Starter) return Promise.resolve();
   if (window.v86Promise) return window.v86Promise;
   window.v86Promise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = CDN + "libv86.js";
-    script.onload = resolve;
-    script.onerror = () => reject(new Error("Could not load the emulator. Check your internet connection."));
+    script.src = ROOT + "build/libv86.js";
+    script.onload = () => (window.V86 || window.V86Starter)
+      ? resolve()
+      : reject(new Error("The v86 script loaded but did not expose its emulator constructor."));
+    script.onerror = () => reject(new Error("Could not download the v86 emulator. Check your connection or CDN access."));
     document.head.appendChild(script);
   });
   return window.v86Promise;
 }
 
 const systems = [
-  { id: "linux", name: "Linux", detail: "Boot a lightweight Linux system", state: "READY", icon: Terminal, available: true },
-  { id: "windows", name: "Windows", detail: "Modern Windows needs a separate VM host", state: "NOT AVAILABLE", icon: AppWindow, available: false },
-  { id: "macos", name: "macOS", detail: "macOS cannot run in this browser emulator", state: "NOT AVAILABLE", icon: Apple, available: false }
+  { id: "linux", name: "Linux", detail: "Lightweight Linux demo", state: "READY", icon: Terminal, available: true },
+  { id: "windows", name: "Windows", detail: "Requires a separate VM backend", state: "UNAVAILABLE", icon: AppWindow, available: false },
+  { id: "macos", name: "macOS", detail: "Not supported by browser emulator", state: "UNAVAILABLE", icon: Apple, available: false }
 ];
 
 function App() {
@@ -64,29 +65,30 @@ function App() {
   const [vm, setVm] = useState(null), [ram, setRam] = useState(estimateRam);
   const [selectedOS, setSelectedOS] = useState("linux");
   const [status, setStatus] = useState("stopped"), [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("Choose Linux to start a built-in operating system. No ISO upload is needed.");
-  const [logs, setLogs] = useState(["WebVM ready.", "Built-in Linux is available."]);
+  const [notice, setNotice] = useState("Select Linux, then press Start machine.");
+  const [logs, setLogs] = useState(["WebVM initialized.", "Built-in Linux is ready to launch."]);
   const [savedAt, setSavedAt] = useState(null), [confirmWipe, setConfirmWipe] = useState(false);
 
-  const log = useCallback(s => setLogs(old => [...old.slice(-59), new Date().toLocaleTimeString() + "  " + s]), []);
+  const log = useCallback(message => setLogs(old => [...old.slice(-19), new Date().toLocaleTimeString() + "  " + message]), []);
   useEffect(() => {
-    let alive = true;
+    let active = true;
     read("machine").then(data => {
-      if (!alive || !data) return;
+      if (!active || !data) return;
       setVm(data); setRam(data.ram || estimateRam()); setSelectedOS(data.os || "linux"); setSavedAt(data.savedAt || null);
-      setNotice("Saved Linux session found. Start Linux to try restoring its last snapshot.");
-      log("Loaded saved VM state from this browser.");
-    }).catch(e => setNotice("Local storage error: " + e.message));
-    return () => { alive = false; };
+      setNotice("Saved Linux snapshot found. Start Linux to restore it.");
+      log("Found a saved browser session.");
+    }).catch(error => setNotice("Browser storage error: " + error.message));
+    return () => { active = false; };
   }, [log]);
 
   const saveSnapshot = useCallback(async () => {
     if (!emulator.current) return;
     try {
-      const state = await new Promise((resolve, reject) => emulator.current.save_state((err, value) => err ? reject(err) : resolve(value)));
+      const state = await new Promise((resolve, reject) => emulator.current.save_state((error, value) => error ? reject(error) : resolve(value)));
       const next = { ...(vm || {}), os: selectedOS, state, ram, savedAt: Date.now() };
-      await write("machine", next); setVm(next); setSavedAt(next.savedAt); log("Linux session snapshot saved in this browser.");
-    } catch (e) { log("Snapshot failed: " + (e?.message || e)); }
+      await write("machine", next); setVm(next); setSavedAt(next.savedAt);
+      log("Session snapshot saved locally.");
+    } catch (error) { log("Snapshot failed: " + (error?.message || error)); }
   }, [vm, selectedOS, ram, log]);
 
   useEffect(() => {
@@ -99,15 +101,13 @@ function App() {
     setSelectedOS(id);
     if (id !== "linux") {
       setNotice(id === "windows"
-        ? "Modern Windows cannot boot in WebVM's lightweight x86 browser emulator. A separate Windows virtualization server and a licensed Windows image would be required."
-        : "macOS cannot run in this browser emulator. Apple hardware and licensing restrictions also apply.");
+        ? "This emulator cannot run modern Windows. A separate virtualization server and licensed Windows image are required."
+        : "macOS is not supported by v86. It cannot be launched inside this browser VM.");
       return;
     }
     const next = { ...(vm || {}), os: "linux", ram };
-    setVm(next);
-    await write("machine", next);
-    setNotice("Linux selected. Click Start machine. The system image downloads automatically on first boot.");
-    log("Selected built-in Linux.");
+    setVm(next); await write("machine", next);
+    setNotice("Linux selected. Press Start machine. The image downloads automatically.");
   };
 
   const stop = async (save = true) => {
@@ -115,115 +115,140 @@ function App() {
     try { emulator.current?.stop(); } catch {}
     emulator.current = null;
     if (display.current) display.current.replaceChildren();
-    setStatus("stopped"); log("Virtual machine stopped.");
+    setStatus("stopped"); setBusy(false); log("Machine powered off.");
   };
 
   const start = async () => {
-    if (selectedOS !== "linux") {
-      setNotice("Only the built-in Linux environment is supported by this browser emulator.");
-      return;
-    }
-    setBusy(true); setNotice("Loading the emulator and built-in Linux image...");
+    if (selectedOS !== "linux" || busy || status === "running") return;
+    setBusy(true); setStatus("starting"); setNotice("Loading emulator, BIOS and Linux image...");
     try {
       await loadV86();
-      const instance = new window.V86Starter({
-        wasm_path: CDN + "v86.wasm",
+      const Emulator = window.V86 || window.V86Starter;
+      const instance = new Emulator({
+        wasm_path: ROOT + "build/v86.wasm",
         memory_size: ram * 1024 * 1024,
         vga_memory_size: 8 * 1024 * 1024,
         screen_container: display.current,
-        bios: { url: CDN + "seabios.bin" },
-        vga_bios: { url: CDN + "vgabios.bin" },
+        bios: { url: ROOT + "bios/seabios.bin" },
+        vga_bios: { url: ROOT + "bios/vgabios.bin" },
         cdrom: { url: LINUX_IMAGE },
-        autostart: false, uart1: true, acpi: true
+        autostart: false,
+        disable_speaker: true,
+        uart1: true,
+        acpi: true
       });
       emulator.current = instance;
+      let readyHandled = false;
       instance.add_listener("emulator-ready", async () => {
+        if (readyHandled) return;
+        readyHandled = true;
         try {
           if (vm?.state && vm.os === "linux" && vm.ram === ram) {
-            await instance.restore_state(vm.state);
-            log("Restored the previous Linux snapshot.");
+            await new Promise((resolve, reject) => instance.restore_state(vm.state, error => error ? reject(error) : resolve()));
+            log("Restored saved Linux session.");
           } else {
             instance.run();
-            log("Booted built-in Linux image.");
+            log("Linux boot started from the built-in image.");
           }
-          setStatus("running"); setNotice("Linux is running. The first boot may take a little time. Click the display to use it.");
-        } catch (e) {
-          setStatus("error"); setNotice("Linux could not start: " + (e?.message || e));
-          log("Boot failed: " + (e?.message || e));
+          setStatus("running");
+          setNotice("Linux is running. Click inside the display to use the keyboard and mouse.");
+        } catch (error) {
+          try { instance.stop(); } catch {}
+          emulator.current = null; setStatus("error");
+          setNotice("Linux failed to boot: " + (error?.message || error));
+          log("Boot error: " + (error?.message || error));
         } finally { setBusy(false); }
       });
-    } catch (e) {
-      emulator.current = null; setStatus("error"); setNotice(e?.message || "Could not start emulator.");
-      log("Start failed: " + (e?.message || e)); setBusy(false);
+      instance.add_listener("download-error", error => {
+        const message = error?.message || "A required emulator file could not be downloaded.";
+        setNotice("Download failed: " + message); log("Download error: " + message);
+        setStatus("error"); setBusy(false);
+      });
+    } catch (error) {
+      emulator.current = null; setStatus("error");
+      setNotice(error?.message || "Could not initialize the emulator.");
+      log("Startup error: " + (error?.message || error)); setBusy(false);
     }
   };
 
   const restart = async () => {
-    if (!emulator.current) return;
-    setBusy(true); await saveSnapshot();
+    if (!emulator.current || busy) return;
+    setBusy(true);
     try { emulator.current.stop(); } catch {}
-    emulator.current = null; if (display.current) display.current.replaceChildren();
-    setStatus("stopped"); setBusy(false); await start();
+    emulator.current = null;
+    if (display.current) display.current.replaceChildren();
+    setStatus("stopped"); setBusy(false);
+    await start();
   };
 
   const setMemory = async value => {
     const nextRam = Number(value); setRam(nextRam);
     const next = { ...(vm || {}), os: selectedOS, ram: nextRam, state: null };
     setVm(next); await write("machine", next);
-    setNotice("RAM setting saved. Start the machine again to apply it.");
-    log("RAM allocation set to " + nextRam + " MB.");
+    setNotice("RAM setting saved. It applies on the next boot.");
   };
 
   const erase = async () => {
     await stop(false); await wipeDB(); setVm(null); setSavedAt(null); setStatus("stopped"); setSelectedOS("linux");
-    setNotice("Saved WebVM session data has been erased from this browser."); setLogs(["WebVM ready.", "Local VM data wiped."]);
+    setNotice("Saved WebVM data erased from this browser."); setLogs(["WebVM initialized.", "Local data wiped."]);
     setConfirmWipe(false);
   };
 
-  return <div className="shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><Monitor size={19}/></div><span>web<span>vm</span></span><small>BETA</small></div>
-      <div className="nav-caption">WORKSPACE</div><div className="nav active"><Monitor size={16}/> Operating systems</div><div className="nav disabled"><HardDrive size={16}/> Storage</div>
-      <div className="side-bottom"><div className="local-card"><ShieldCheck size={18}/><div><b>Local-first</b><span>Your VM session stays in this browser.</span></div></div><div className="user-card"><div className="avatar">W</div><div><b>WebVM session</b><span>Browser workspace</span></div></div></div>
-    </aside>
-    <main className="main">
-      <header className="topbar"><div>Workspace <span>/</span> <b>Operating systems</b></div><div className="top-status"><i/> Local storage enabled <em>W</em></div></header>
-      <div className="content">
-        <div className="heading"><div><label>VIRTUALIZATION WORKSPACE</label><h1>Choose your operating system</h1><p>Start a built-in system directly in your browser. No ISO upload required.</p></div><div className="status"><i className={status === "running" ? "on" : ""}/>{status === "running" ? "Running" : status === "error" ? "Error" : "Powered off"}</div></div>
-        <section className="os-grid">
-          {systems.map(os => { const Icon = os.icon; return <button key={os.id} className={"os-card " + (selectedOS === os.id ? "selected" : "") + (!os.available ? " unavailable" : "")} onClick={() => chooseOS(os.id)}>
-            <div className="os-card-top"><div className={"os-brand-icon " + os.id}><Icon size={23}/></div><span className={os.available ? "ready" : "not-ready"}>{os.state}</span></div>
-            <b>{os.name}</b><span>{os.detail}</span>
-            <small>{os.available ? (selectedOS === os.id ? "SELECTED" : "CLICK TO SELECT") : "REQUIRES DIFFERENT EMULATOR"}</small>
-          </button>; })}
-        </section>
-        <section className="machine card">
-          <div className="machine-head"><div className="machine-name"><div className="os-icon"><Terminal size={19}/></div><div><b>{selectedOS === "linux" ? "Built-in Linux" : selectedOS === "windows" ? "Windows" : "macOS"}</b><span>{selectedOS === "linux" ? "Linux image hosted by the v86 project" : "Not supported by the current browser emulator"}</span></div></div><div className="actions">
-            <button className="button subtle" onClick={() => stop(true)} disabled={status !== "running" || busy}><Power size={14}/> Shut down</button>
-            <button className="button subtle" onClick={restart} disabled={status !== "running" || busy}><RefreshCw size={14}/> Restart</button>
-            <button className="button primary" onClick={status === "running" ? () => stop(true) : start} disabled={busy || (selectedOS !== "linux" && status !== "running")}>{busy ? <span className="spinner"/> : status === "running" ? <Power size={14}/> : <Zap size={14}/>} {busy ? "Working..." : status === "running" ? "Stop machine" : "Start machine"}</button>
-          </div></div>
-          <div className="screen-frame"><div className="screen-bar"><div className="lights"><i/><i/><i/></div>VM CONSOLE <span>VGA DISPLAY</span></div><div className="screen" ref={display}><div className="screen-empty"><div><Monitor size={29}/></div><b>{status === "running" ? "Initializing display..." : "Your machine is powered off"}</b><span>{selectedOS === "linux" ? "Select Start machine to boot Linux." : "Choose Linux to run an operating system in this browser."}</span></div></div><div className="screen-foot"><span><i className={status === "running" ? "on" : ""}/>{status === "running" ? "Connected to emulator" : "No active session"}</span><span>Click display to capture input</span></div></div>
-          <div className="machine-notice"><span><Activity size={14}/>{notice}</span>{savedAt && <small>Saved {new Date(savedAt).toLocaleString()}</small>}</div>
-        </section>
-        <div className="columns">
-          <section className="card panel"><div className="panel-title"><div><h2>Machine configuration</h2><p>Resources allocated to this VM.</p></div><small><Zap size={11}/> AUTO DETECTED</small></div>
-            <div className="setting"><div className="setting-icon"><Cpu size={16}/></div><div><b>Memory (RAM)</b><span>Estimated host memory: {navigator.deviceMemory || "Unknown"} GB</span></div><select value={ram} disabled={status === "running"} onChange={e => setMemory(e.target.value)}><option value="256">256 MB</option><option value="512">512 MB</option><option value="1024">1 GB</option><option value="1536">1.5 GB</option><option value="2048">2 GB</option></select></div>
-            <div className="setting"><div className="setting-icon"><Monitor size={16}/></div><div><b>Video memory</b><span>Emulated VGA memory</span></div><strong>8 MB</strong></div>
-            <div className="setting"><div className="setting-icon"><HardDrive size={16}/></div><div><b>System image</b><span>Downloaded directly from the v86 image host</span></div><strong>Linux</strong></div>
-            <div className="hint"><Info size={14}/> WebVM uses a lightweight 32-bit x86 emulator. It cannot run current Windows or macOS.</div>
-          </section>
-          <section className="card panel"><div className="panel-title"><div><h2>Built-in system</h2><p>No file upload or manual setup.</p></div><div className="upload-icon"><ShieldCheck size={16}/></div></div>
-            <div className="builtin-card"><div className="builtin-symbol"><Terminal size={22}/></div><div><b>Linux boot image</b><span>Hosted by the v86 project. Loaded on demand when you press Start.</span></div><span className="ready">READY</span></div>
-            <div className="warning"><AlertTriangle size={14}/> Windows and macOS require a different virtualization setup. They are not silently replaced with lookalike systems.</div>
-          </section>
+  return <div className="app-shell">
+    <header className="topbar">
+      <div className="brand"><span className="brand-mark"><Monitor size={17}/></span><strong>web<span>vm</span></strong><small>BETA</small></div>
+      <div className="top-center">BROWSER VIRTUALIZATION <span>/</span> WORKSPACE</div>
+      <div className="top-right"><i className={status === "running" ? "live" : ""}/>{status === "running" ? "RUNNING" : status === "starting" ? "STARTING" : status === "error" ? "ERROR" : "LOCAL SESSION"}</div>
+    </header>
+
+    <main className="workspace">
+      <section className="intro">
+        <div><label>YOUR BROWSER VM</label><h1>Choose an operating system</h1><p>Launch a built-in system without uploading an ISO.</p></div>
+        <div className="local-tag"><ShieldCheck size={15}/> Runs in your browser</div>
+      </section>
+
+      <section className="os-picker" aria-label="Operating systems">
+        {systems.map(os => { const Icon = os.icon; return <button key={os.id} className={"os-tile " + (selectedOS === os.id ? "chosen" : "") + (!os.available ? " locked" : "")} onClick={() => chooseOS(os.id)}>
+          <span className={"tile-icon " + os.id}><Icon size={22}/></span>
+          <span className="tile-copy"><b>{os.name}</b><small>{os.detail}</small></span>
+          <span className={"tile-state " + (os.available ? "available" : "")}>{os.state}</span>
+        </button>; })}
+      </section>
+
+      <section className="console-card">
+        <div className="console-head">
+          <div className="console-title"><span className="console-symbol"><Terminal size={17}/></span><div><b>{selectedOS === "linux" ? "Linux virtual machine" : selectedOS === "windows" ? "Windows virtual machine" : "macOS virtual machine"}</b><small>{selectedOS === "linux" ? "v86 x86 emulator · Built-in boot image" : "Not supported by the current emulator"}</small></div></div>
+          <div className="console-actions">
+            <button className="action-button" onClick={() => stop(true)} disabled={status !== "running" || busy}><Power size={14}/> Shut down</button>
+            <button className="action-button" onClick={restart} disabled={status !== "running" || busy}><RefreshCw size={14}/> Restart</button>
+            <button className="action-button primary-action" onClick={status === "running" ? () => stop(true) : start} disabled={busy || (selectedOS !== "linux" && status !== "running")}><Zap size={14}/>{busy ? "Starting..." : status === "running" ? "Stop machine" : "Start machine"}</button>
+          </div>
         </div>
-        <section className="card logs"><div className="panel-title"><div><h2>Activity log</h2><p>Recent virtual machine events.</p></div><button className="clear" onClick={() => setLogs([])}>Clear log</button></div><div className="log-list">{logs.slice(-6).reverse().map((line,i)=><div key={i}><i/><code>{line}</code></div>)}</div></section>
-        <section className="danger"><div><div className="danger-icon"><Trash2 size={17}/></div><div><b>Wipe virtual machine</b><span>Erase the saved Linux snapshot and local configuration.</span></div></div><button className="button danger-button" onClick={() => setConfirmWipe(true)}><Trash2 size={14}/> Wipe all data</button></section>
-        <footer>WebVM uses the open-source v86 x86 emulator. Linux system files load from the v86 image host. Browser storage can be cleared by browser settings.</footer>
-      </div>
+        <div className="screen-wrap">
+          <div className="screen-caption"><span><i className={status === "running" ? "live" : ""}/>{status === "running" ? "DISPLAY CONNECTED" : status === "starting" ? "INITIALIZING" : "VM DISPLAY"}</span><span>CLICK SCREEN TO CAPTURE INPUT</span></div>
+          <div className="screen" ref={display}>
+            <div className="screen-placeholder"><div className="placeholder-icon"><Monitor size={27}/></div><b>{status === "starting" ? "Starting Linux..." : status === "running" ? "Preparing display..." : "Your virtual machine is off"}</b><span>{selectedOS === "linux" ? "Press Start machine to boot the built-in Linux image." : "Select Linux to launch a supported system."}</span></div>
+          </div>
+        </div>
+        <div className="console-foot"><span><Activity size={14}/>{notice}</span>{savedAt && <small>LAST SAVED {new Date(savedAt).toLocaleTimeString()}</small>}</div>
+      </section>
+
+      <section className="bottom-grid">
+        <div className="settings-card">
+          <div className="section-heading"><div><b>Machine resources</b><small>Configure the browser emulator</small></div><span className="auto-pill">AUTO CONFIG</span></div>
+          <div className="resource-row"><span className="resource-icon"><Cpu size={16}/></span><div className="resource-copy"><b>Memory allocation</b><small>Estimated device memory: {navigator.deviceMemory || "?"} GB</small></div><select value={ram} disabled={status === "running" || busy} onChange={e => setMemory(e.target.value)}><option value="256">256 MB</option><option value="512">512 MB</option><option value="768">768 MB</option><option value="1024">1 GB</option><option value="1536">1.5 GB</option><option value="2048">2 GB</option></select></div>
+          <div className="resource-row"><span className="resource-icon"><HardDrive size={16}/></span><div className="resource-copy"><b>System image</b><small>Linux demo image · downloaded on demand</small></div><span className="resource-value">ONLINE</span></div>
+        </div>
+        <div className="info-card">
+          <div className="section-heading"><div><b>Session information</b><small>Local browser storage</small></div><span className="secure-pill"><ShieldCheck size={12}/> PRIVATE</span></div>
+          <p>Snapshots are saved in this browser when possible. Keep this tab open while Linux runs. Browser storage is not a full virtual hard drive.</p>
+          <button className="wipe-button" onClick={() => setConfirmWipe(true)} disabled={busy}><Trash2 size={13}/> Clear saved session</button>
+        </div>
+      </section>
+      <footer>Linux is a lightweight demo environment. Current Windows and macOS releases are not supported by this emulator.</footer>
     </main>
-    {confirmWipe && <div className="modal-backdrop"><div className="modal"><div className="modal-warning"><AlertTriangle size={22}/></div><h2>Erase this virtual machine?</h2><p>This deletes the saved Linux snapshot and WebVM settings from this browser. It cannot be undone.</p><div><button className="button subtle" onClick={() => setConfirmWipe(false)}>Cancel</button><button className="button danger-button" onClick={erase}>Erase everything</button></div></div></div>}
+
+    {confirmWipe && <div className="modal-backdrop"><div className="modal"><span className="modal-icon"><AlertTriangle size={21}/></span><h2>Clear saved session?</h2><p>This removes WebVM's saved snapshot and settings from this browser.</p><div className="modal-actions"><button className="action-button" onClick={() => setConfirmWipe(false)}>Cancel</button><button className="action-button primary-action" onClick={erase}><Trash2 size={13}/> Clear data</button></div></div></div>}
   </div>;
 }
 createRoot(document.getElementById("root")).render(<App/>);
